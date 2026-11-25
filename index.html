@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Family Hub</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#e8684a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Family Hub">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<script src="firebase-config.js"></script>
+<style>
+:root{--bg:#fbf6ef;--card:#fff;--ink:#2b2a33;--mut:#7a7684;--line:#eadfce;--accent:#e8684a;--accent2:#2f8f83;--r:16px}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--ink);padding-bottom:84px}
+header{padding:20px 18px 8px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+h1{margin:0;font-size:1.5rem}
+h1 small{display:block;font-size:.8rem;font-weight:400;color:var(--mut)}
+h2{font-size:1.05rem;margin:18px 0 8px}
+main{max-width:720px;margin:0 auto;padding:0 14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;margin-bottom:10px}
+.row{display:flex;align-items:center;gap:10px}
+.grow{flex:1;min-width:0}
+.mut{color:var(--mut);font-size:.85rem}
+.dot{width:30px;height:30px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:.85rem;flex:none}
+.dot.sm{width:22px;height:22px;font-size:.7rem}
+nav{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid var(--line);display:flex;justify-content:space-around;padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
+nav button{background:none;border:0;font:inherit;font-size:.72rem;color:var(--mut);padding:4px 8px;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;border-radius:10px}
+nav button span{font-size:1.3rem}
+nav button.on{color:var(--accent);font-weight:600}
+input,select,textarea{font:inherit;padding:9px 10px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink);min-width:0}
+button.btn{font:inherit;background:var(--accent);color:#fff;border:0;border-radius:10px;padding:9px 14px;cursor:pointer;font-weight:600}
+button.btn.alt{background:var(--accent2)}
+button.ghost{background:none;border:0;color:var(--mut);cursor:pointer;font-size:1.1rem;padding:4px 8px}
+.form{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.form input[type=text]{flex:1;min-width:140px}
+.done .t{text-decoration:line-through;color:var(--mut)}
+.chk{width:24px;height:24px;border-radius:50%;border:2px solid var(--line);background:#fff;cursor:pointer;flex:none;display:flex;align-items:center;justify-content:center;color:#fff;font-size:.8rem;padding:0}
+.done .chk{background:var(--accent2);border-color:var(--accent2)}
+.pill{display:inline-block;background:#f3ebdd;border-radius:99px;padding:1px 9px;font-size:.78rem;color:var(--mut)}
+.empty{text-align:center;color:var(--mut);padding:22px 10px}
+.banner{background:#fff3cd;border:1px solid #f0d98a;border-radius:12px;padding:10px 12px;margin:6px 14px;font-size:.88rem}
+.board .msg{white-space:pre-wrap;word-break:break-word}
+.score{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
+.score .card{min-width:110px;text-align:center;margin:0}
+.big{font-size:1.5rem;font-weight:700}
+.today{border-left:5px solid var(--accent)}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Family Hub<small id="sub">Everyone, in one place</small></h1>
+  <select id="me" title="Who are you?"></select>
+</header>
+<div id="banner"></div>
+<main id="view"></main>
+<nav id="nav"></nav>
+
+<script>
+(async function(){
+const COLORS=['#e8684a','#2f8f83','#6c63c9','#d99a1f','#c2477f','#3b82c4','#7a9a2b','#8d5b3a'];
+const TABS=[['home','🏠','Home'],['cal','📅','Calendar'],['chores','✅','Chores'],['shop','🛒','Shopping'],['board','💬','Board'],['fam','👨‍👩‍👧','Family']];
+const S={members:[],events:[],chores:[],shop:[],posts:[]};
+(function(){const m=location.hash.match(/^#join=([a-z0-9]{6,})/);if(m){try{localStorage.setItem('fh-code',m[1])}catch(e){}history.replaceState(null,'',location.pathname)}})();
+let tab=(location.hash||'#home').slice(1);if(!TABS.some(t=>t[0]===tab))tab='home';
+let meId=null;
+try{meId=localStorage.getItem('fh-me')}catch(e){}
+const $=s=>document.querySelector(s);
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const el=(tag,props,...kids)=>{const e=document.createElement(tag);for(const k in(props||{})){if(k==='class')e.className=props[k];else if(k.startsWith('on'))e.addEventListener(k.slice(2),props[k]);else if(k==='text')e.textContent=props[k];else e.setAttribute(k,props[k])}kids.flat().forEach(c=>c!=null&&e.append(c));return e};
+const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+const member=id=>S.members.find(m=>m.id===id);
+const dot=(id,sm)=>{const m=member(id);return el('span',{class:'dot'+(sm?' sm':''),style:'background:'+(m?m.color:'#bbb'),title:m?m.name:'Everyone',text:m?m.name[0].toUpperCase():'★'})};
+const fmtDate=s=>{const d=new Date(s+'T00:00');return d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})};
+
+// ---- data layer: saved on this phone; optionally synced with the family through Firebase
+const LS='fh-data-v1';
+try{const d=JSON.parse(localStorage.getItem(LS)||'null');if(d)COLS.forEach(c=>{S[c]=d[c]||[]})}catch(e){}
+function persist(){try{localStorage.setItem(LS,JSON.stringify(S))}catch(e){}}
+function banner(t){const b=$('#banner');b.innerHTML='';if(t)b.append(el('div',{class:'banner',text:t}))}
+let sync={state:'off',put:null,del:null,pushAll:null};
+async function save(col,item){
+  const i=S[col].findIndex(x=>x.id===item.id);
+  if(i>=0)S[col][i]=item;else S[col].push(item);
+  persist();render();
+  if(sync.put)sync.put(col,item).catch(e=>banner('Sync problem: '+(e.message||e)));
+}
+async function remove(col,id){
+  S[col]=S[col].filter(x=>x.id!==id);persist();render();
+  if(sync.del)sync.del(col,id).catch(e=>banner('Sync problem: '+(e.message||e)));
+}
+const getCode=()=>{try{return localStorage.getItem('fh-code')||''}catch(e){return ''}};
+const setCode=c=>{try{c?localStorage.setItem('fh-code',c):localStorage.removeItem('fh-code')}catch(e){}};
+async function startSync(){
+  const code=getCode(),cfg=window.FIREBASE_CONFIG;
+  if(!code||!cfg||!cfg.apiKey||cfg.apiKey.startsWith('PASTE')){sync.state=code?'noconfig':'off';return}
+  try{
+    sync.state='connecting';render();
+    const V='13.4.0',base='https://www.gstatic.com/firebasejs/'+V+'/';
+    const [{initializeApp},{getAuth,signInAnonymously},F]=await Promise.all([import(base+'firebase-app.js'),import(base+'firebase-auth.js'),import(base+'firebase-firestore.js')]);
+    const app=initializeApp(cfg);await signInAnonymously(getAuth(app));
+    const fs=F.getFirestore(app),items=F.collection(fs,'families',code,'items');
+    sync.put=(col,item)=>F.setDoc(F.doc(items,col+'__'+item.id),Object.assign({},item,{col}));
+    sync.del=(col,id)=>F.deleteDoc(F.doc(items,col+'__'+id));
+    sync.pushAll=()=>Promise.all(COLS.flatMap(c=>S[c].map(x=>sync.put(c,x))));
+    let first=true;
+    F.onSnapshot(items,snap=>{
+      const next={};COLS.forEach(c=>next[c]=[]);
+      snap.forEach(d=>{const v=d.data();if(next[v.col]){const x=Object.assign({},v);delete x.col;next[v.col].push(x)}});
+      if(first&&snap.empty&&COLS.some(c=>S[c].length)){first=false;sync.pushAll();return}
+      first=false;COLS.forEach(c=>{S[c]=next[c]});persist();sync.state='on';render();
+    },err=>{sync.state='error';banner('Sync problem: '+(err.message||err));render()});
+  }catch(e){sync.state='error';banner('Could not start sharing: '+(e.message||e));render()}
+}
+const newCode=()=>Array.from(crypto.getRandomValues(new Uint8Array(10)),b=>'abcdefghjkmnpqrstuvwxyz23456789'[b%31]).join('');
+
+// ---- header / nav
+function renderNav(){
+  const n=$('#nav');n.innerHTML='';
+  TABS.forEach(([k,i,l])=>n.append(el('button',{class:tab===k?'on':'',onclick:()=>{tab=k;try{location.hash=k}catch(e){}render()}},el('span',{text:i}),l)));
+}
+function renderMe(){
+  const s=$('#me');s.innerHTML='';
+  s.append(el('option',{value:'',text:S.members.length?'Who are you?':'Add family first'}));
+  S.members.forEach(m=>{const o=el('option',{value:m.id,text:m.name});if(m.id===meId)o.selected=true;s.append(o)});
+  s.onchange=()=>{meId=s.value||null;try{localStorage.setItem('fh-me',meId||'')}catch(e){}render()};
+}
+const memberSelect=(withAll)=>{const s=el('select');if(withAll)s.append(el('option',{value:'',text:'Anyone'}));S.members.forEach(m=>s.append(el('option',{value:m.id,text:m.name})));if(meId&&!withAll)s.value=meId;return s};
+
+// ---- views
+function vHome(){
+  const t=today(),v=el('div');
+  const hr=new Date().getHours();
+  const me=member(meId);
+  v.append(el('h2',{text:(hr<12?'Good morning':hr<18?'Good afternoon':'Good evening')+(me?', '+me.name:'')+'!'}));
+  const evs=occurrences(t,1);
+  v.append(el('h2',{text:'Today'}));
+  if(!evs.length)v.append(el('div',{class:'card mut',text:'Nothing on the calendar today.'}));
+  evs.forEach(e=>v.append(evRow(e,false)));
+  const soon=occurrences(t,15).filter(e=>e.on>t&&(e.amount||e.cat==='birthday'||e.cat==='anniversary')).slice(0,4);
+  if(soon.length){v.append(el('h2',{text:'Coming up (next 2 weeks)'}));soon.forEach(e=>{const r=evRow(e,false);r.querySelector('.mut').textContent=fmtDate(e.on)+' · '+r.querySelector('.mut').textContent;v.append(r)})}
+  const open=S.chores.filter(c=>!c.done&&(!meId||!c.who||c.who===meId));
+  v.append(el('h2',{text:'Chores to do ('+open.length+')'}));
+  if(!open.length)v.append(el('div',{class:'card mut',text:'All clear 🎉'}));
+  open.slice(0,5).forEach(c=>v.append(choreRow(c)));
+  const need=S.shop.filter(x=>!x.done).length;
+  v.append(el('h2',{text:'Shopping list'}),el('div',{class:'card row'},el('div',{class:'grow',text:need?need+' item'+(need>1?'s':'')+' needed':'List is empty'}),el('button',{class:'btn alt',onclick:()=>{tab='shop';render()},text:'Open'})));
+  const last=[...S.posts].sort((a,b)=>b.ts-a.ts)[0];
+  if(last)v.append(el('h2',{text:'Latest on the board'}),el('div',{class:'card row board'},dot(last.who,1),el('div',{class:'grow msg',text:last.text})));
+  return v;
+}
+const CATS={event:['📌','Event'],birthday:['🎂','Birthday'],anniversary:['💍','Anniversary'],insurance:['🛡️','Insurance due'],rent:['🏠','Rent'],utilities:['💡','Utilities'],bill:['💳','Other payment']};
+const MONEY=['insurance','rent','utilities','bill'];
+const pad=n=>String(n).padStart(2,'0');
+const ds=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+function matches(e,d){
+  const [y,m,dd]=e.date.split('-').map(Number);
+  if(ds(d)<e.date)return false;
+  if(!e.repeat||e.repeat==='none')return ds(d)===e.date;
+  const dim=new Date(d.getFullYear(),d.getMonth()+1,0).getDate();
+  const day=Math.min(dd,dim);
+  if(e.repeat==='monthly')return d.getDate()===day;
+  if(e.repeat==='yearly')return d.getMonth()+1===m&&d.getDate()===Math.min(dd,new Date(d.getFullYear(),m,0).getDate());
+  return false;
+}
+function occurrences(from,days){
+  const out=[];const d=new Date(from+'T00:00');
+  for(let i=0;i<days;i++){const x=new Date(d.getFullYear(),d.getMonth(),d.getDate()+i);S.events.forEach(e=>{if(matches(e,x))out.push(Object.assign({},e,{on:ds(x)}))})}
+  return out.sort((a,b)=>(a.on+(a.time||'')).localeCompare(b.on+(b.time||'')));
+}
+const money=n=>n?(+n).toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:2}):'';
+function evRow(e,showDel){
+  const c=CATS[e.cat||'event']||CATS.event;
+  const bits=[e.time||'All day'];if(e.repeat&&e.repeat!=='none')bits.push('repeats '+e.repeat);
+  return el('div',{class:'card row'},el('span',{style:'font-size:1.5rem',text:c[0]}),el('div',{class:'grow'},el('div',{text:e.title}),el('div',{class:'mut',text:c[1]+' · '+bits.join(' · ')})),e.amount?el('span',{class:'pill',text:'$'+money(e.amount)}):null,dot(e.who,1),showDel?el('button',{class:'ghost',title:'Delete',text:'✕',onclick:()=>remove('events',e.id)}):null);
+}
+function vCal(){
+  const v=el('div');
+  const cat=el('select');Object.entries(CATS).forEach(([k,[i,l]])=>cat.append(el('option',{value:k,text:i+' '+l})));
+  const t=el('input',{type:'text',placeholder:'Title (e.g. Mum birthday, Car insurance)'}),d=el('input',{type:'date',value:today()}),tm=el('input',{type:'time'});
+  const amt=el('input',{type:'number',min:'0',step:'0.01',placeholder:'Amount (optional)',style:'width:140px'});
+  const rep=el('select');[['none','One time'],['monthly','Every month'],['yearly','Every year']].forEach(([k,l])=>rep.append(el('option',{value:k,text:l})));
+  const w=memberSelect(true);
+  cat.onchange=()=>{rep.value=['birthday','anniversary'].includes(cat.value)?'yearly':['rent','utilities'].includes(cat.value)?'monthly':'none'};
+  v.append(el('div',{class:'form'},cat,t,d,tm,amt,rep,w,el('button',{class:'btn',text:'Add',onclick:()=>{if(!t.value.trim()||!d.value)return;save('events',{id:uid(),title:t.value.trim(),date:d.value,time:tm.value,who:w.value,cat:cat.value,amount:amt.value?+amt.value:0,repeat:rep.value});t.value='';amt.value=''}})));
+  const now=new Date(),ms=now.getFullYear()+'-'+pad(now.getMonth()+1);
+  const monthOcc=occurrences(ms+'-01',new Date(now.getFullYear(),now.getMonth()+1,0).getDate()).filter(e=>e.amount);
+  const tot=monthOcc.reduce((a,e)=>a+e.amount,0),left=monthOcc.filter(e=>e.on>=today()).reduce((a,e)=>a+e.amount,0);
+  v.append(el('div',{class:'card'},el('div',{class:'mut',text:'This month\'s payments'}),el('div',{class:'big',text:'$'+money(tot)}),el('div',{class:'mut',text:'$'+money(left)+' still to pay · '+monthOcc.length+' items'})));
+  const up=occurrences(today(),400);
+  if(!up.length)v.append(el('div',{class:'empty',text:'Nothing yet. Add birthdays, anniversaries, rent, insurance and bills.'}));
+  let cur='';
+  up.forEach(e=>{if(e.on!==cur){cur=e.on;v.append(el('h2',{text:e.on===today()?'Today':fmtDate(e.on)}))}v.append(evRow(e,true))});
+  return v;
+}
+function choreRow(c){
+  return el('div',{class:'card row'+(c.done?' done':'')},
+    el('button',{class:'chk',text:c.done?'✓':'',onclick:()=>save('chores',Object.assign({},c,{done:!c.done,doneBy:!c.done?meId:null,doneAt:!c.done?Date.now():null}))}),
+    el('div',{class:'grow'},el('div',{class:'t',text:c.title}),el('span',{class:'pill',text:'⭐ '+(c.points||1)})),
+    dot(c.who,1),el('button',{class:'ghost',title:'Delete',text:'✕',onclick:()=>remove('chores',c.id)}));
+}
+function vChores(){
+  const v=el('div');
+  const t=el('input',{type:'text',placeholder:'New chore (e.g. Take out trash)'}),w=memberSelect(true),p=el('select');
+  [1,2,3,5].forEach(n=>p.append(el('option',{value:n,text:'⭐ '+n})));
+  v.append(el('div',{class:'form'},t,w,p,el('button',{class:'btn',text:'Add',onclick:()=>{if(!t.value.trim())return;save('chores',{id:uid(),title:t.value.trim(),who:w.value,points:+p.value,done:false});t.value=''}})));
+  if(S.members.length){
+    const sc=el('div',{class:'score'});
+    S.members.map(m=>({m,pts:S.chores.filter(c=>c.done&&c.doneBy===m.id).reduce((a,c)=>a+(c.points||1),0)})).sort((a,b)=>b.pts-a.pts).forEach(({m,pts})=>sc.append(el('div',{class:'card'},dot(m.id),el('div',{class:'big',text:pts}),el('div',{class:'mut',text:m.name+' ⭐'}))));
+    v.append(sc);
+  }
+  const open=S.chores.filter(c=>!c.done),done=S.chores.filter(c=>c.done);
+  v.append(el('h2',{text:'To do'}));
+  if(!open.length)v.append(el('div',{class:'empty',text:'No chores. Enjoy! 🎉'}));
+  open.forEach(c=>v.append(choreRow(c)));
+  if(done.length){v.append(el('h2',{text:'Done'}),el('button',{class:'ghost',text:'Clear done',onclick:()=>done.forEach(c=>remove('chores',c.id))}));done.forEach(c=>v.append(choreRow(c)))}
+  return v;
+}
+function vShop(){
+  const v=el('div');
+  const t=el('input',{type:'text',placeholder:'Add item (e.g. Milk)'});
+  const add=()=>{if(!t.value.trim())return;save('shop',{id:uid(),text:t.value.trim(),done:false,by:meId||''});t.value='';t.focus()};
+  t.addEventListener('keydown',e=>{if(e.key==='Enter')add()});
+  v.append(el('div',{class:'form'},t,el('button',{class:'btn',text:'Add',onclick:add})));
+  const imp=el('details',{class:'card'},el('summary',{text:'📥 Import from Pantry app'}));
+  const ta=el('textarea',{rows:'5',placeholder:'Paste the Buy List here, one item per line. Bullets, numbers and checkboxes are removed. Items already on the list are skipped.',style:'width:100%;margin:8px 0'});
+  const msg=el('div',{class:'mut'});
+  imp.append(ta,el('button',{class:'btn alt',text:'Import items',onclick:()=>{
+    const have=new Set(S.shop.filter(x=>!x.done).map(x=>x.text.toLowerCase()));let n=0,skip=0;
+    ta.value.split(/\r?\n|,(?=\s*[A-Za-z\u0B80-\u0BFF])/).forEach(l=>{
+      const t=l.replace(/^\s*(?:[-*\u2022\u2610\u2611\u2713]|\[[ xX]?\]|\d+[.)])\s*/,'').trim();
+      if(!t||t.length>80)return;
+      if(have.has(t.toLowerCase())){skip++;return}
+      have.add(t.toLowerCase());n++;save('shop',{id:uid(),text:t,done:false,by:meId||''});
+    });
+    msg.textContent=n+' added'+(skip?', '+skip+' already on the list':'')+'.';ta.value='';
+  }}),msg);
+  imp.append(el('p',{class:'mut'},'Open your ',el('a',{href:'https://thillai-nandhini.github.io/pantry/',target:'_blank',rel:'noopener',text:'Pantry app'}),', copy its Buy List, then paste here.'));
+  v.append(imp);
+  const open=S.shop.filter(x=>!x.done),done=S.shop.filter(x=>x.done);
+  if(!S.shop.length)v.append(el('div',{class:'empty',text:'The list is empty.'}));
+  const row=x=>el('div',{class:'card row'+(x.done?' done':'')},el('button',{class:'chk',text:x.done?'✓':'',onclick:()=>save('shop',Object.assign({},x,{done:!x.done}))}),el('div',{class:'grow t',text:x.text}),x.by?dot(x.by,1):null,el('button',{class:'ghost',text:'✕',onclick:()=>remove('shop',x.id)}));
+  open.forEach(x=>v.append(row(x)));
+  if(done.length){v.append(el('h2',{text:'In the cart'}),el('button',{class:'ghost',text:'Clear checked',onclick:()=>done.forEach(x=>remove('shop',x.id))}));done.forEach(x=>v.append(row(x)))}
+  return v;
+}
+function vBoard(){
+  const v=el('div');
+  const t=el('textarea',{rows:'2',placeholder:'Write a note for the family…',style:'flex:1;min-width:200px'});
+  v.append(el('div',{class:'form'},t,el('button',{class:'btn',text:'Post',onclick:()=>{if(!t.value.trim())return;save('posts',{id:uid(),text:t.value.trim(),who:meId||'',ts:Date.now()});t.value=''}})));
+  const ps=[...S.posts].sort((a,b)=>b.ts-a.ts);
+  if(!ps.length)v.append(el('div',{class:'empty',text:'No messages yet. Say hi! 👋'}));
+  ps.forEach(p=>v.append(el('div',{class:'card board'},el('div',{class:'row'},dot(p.who,1),el('div',{class:'grow mut',text:(member(p.who)?member(p.who).name:'Someone')+' · '+new Date(p.ts).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}),el('button',{class:'ghost',text:'✕',onclick:()=>remove('posts',p.id)})),el('div',{class:'msg',text:p.text}))));
+  return v;
+}
+function vFam(){
+  const v=el('div');
+  const n=el('input',{type:'text',placeholder:'Name (e.g. Mia)'});
+  v.append(el('div',{class:'form'},n,el('button',{class:'btn',text:'Add member',onclick:()=>{const name=n.value.trim();if(!name)return;const id=uid();save('members',{id,name,color:COLORS[S.members.length%COLORS.length]});if(!meId){meId=id;try{localStorage.setItem('fh-me',id)}catch(e){}}n.value=''}})));
+  if(!S.members.length)v.append(el('div',{class:'empty',text:'Add everyone in the family to get started.'}));
+  S.members.forEach(m=>{
+    const pts=S.chores.filter(c=>c.done&&c.doneBy===m.id).reduce((a,c)=>a+(c.points||1),0);
+    const ev=S.events.filter(e=>e.who===m.id&&e.date>=today()).length;
+    v.append(el('div',{class:'card row'},dot(m.id),el('div',{class:'grow'},el('div',{text:m.name+(m.id===meId?' (you)':'')}),el('div',{class:'mut',text:ev+' upcoming · ⭐ '+pts})),el('button',{class:'ghost',text:'✕',onclick:()=>remove('members',m.id)})));
+  });
+  const code=getCode(),st={off:'Not shared (only on this phone)',noconfig:'Family code set, but firebase-config.js is not filled in',connecting:'Connecting…',on:'● Synced with family',error:'Sync error'}[sync.state];
+  const ci=el('input',{type:'text',placeholder:'Enter family code',style:'flex:1'});
+  const box=el('div',{class:'card'},el('div',{text:'Family sharing'}),el('div',{class:'mut',text:st}));
+  if(code){box.append(el('div',{class:'big',style:'letter-spacing:2px',text:code}),el('div',{class:'mut',text:'Share this code. Everyone who joins sees the same hub.'}),
+    el('div',{class:'form',style:'margin-top:8px'},el('button',{class:'btn alt',text:'Copy invite link',onclick:()=>{const u=location.origin+location.pathname+'#join='+code;(navigator.clipboard?navigator.clipboard.writeText(u):Promise.reject()).then(()=>banner('Invite link copied.'),()=>banner(u))}}),el('button',{class:'ghost',text:'Leave family',onclick:()=>{setCode('');location.reload()}})));
+  }else{
+    box.append(el('div',{class:'form',style:'margin-top:8px'},el('button',{class:'btn',text:'Create family code',onclick:()=>{setCode(newCode());location.reload()}})),el('div',{class:'form'},ci,el('button',{class:'btn alt',text:'Join',onclick:()=>{const c=ci.value.trim().toLowerCase();if(c.length<6)return;setCode(c);location.reload()}})));
+  }
+  v.append(box);
+  const bm=el('div',{class:'mut'}),fi=el('input',{type:'file',accept:'.xlsx,.xls,.csv',style:'display:none'});
+  fi.onchange=async()=>{const f=fi.files[0];if(!f)return;if(!confirm('Replace everything in the app with the contents of this file?'))return;try{bm.textContent='Restored: '+await importExcel(f)}catch(e){bm.textContent='Could not read the file: '+(e.message||e)}};
+  v.append(el('div',{class:'card'},el('div',{text:'Backup (Excel)'}),el('div',{class:'mut',text:'Saves members, calendar, chores, shopping and board in one .xlsx file, one sheet each.'}),
+    el('div',{class:'form',style:'margin-top:8px'},el('button',{class:'btn',text:'Download Excel backup',onclick:()=>exportExcel().catch(e=>{bm.textContent=e.message||e})}),el('button',{class:'btn alt',text:'Restore from Excel',onclick:()=>fi.click()}),fi),bm));
+  return v;
+}
+
+// ---- Excel backup / restore
+let xlsxP=null;
+const loadXlsx=()=>xlsxP||(xlsxP=new Promise((ok,no)=>{if(window.XLSX)return ok(window.XLSX);const sc=document.createElement('script');sc.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';sc.onload=()=>ok(window.XLSX);sc.onerror=()=>{xlsxP=null;no(new Error('Could not load the Excel library. Check your internet connection.'))};document.head.append(sc)}));
+const nm=id=>(member(id)||{}).name||'';
+async function exportExcel(){
+  const X=await loadXlsx();const wb=X.utils.book_new();
+  const add=(name,rows,cols)=>{const ws=X.utils.json_to_sheet(rows,{header:cols});ws['!cols']=cols.map(c=>({wch:Math.max(10,c.length+2)}));X.utils.book_append_sheet(wb,ws,name)};
+  add('Members',S.members.map(m=>({ID:m.id,Name:m.name,Color:m.color})),['ID','Name','Color']);
+  add('Calendar',[...S.events].sort((a,b)=>a.date.localeCompare(b.date)).map(e=>({ID:e.id,Title:e.title,Category:(CATS[e.cat||'event']||CATS.event)[1],Date:e.date,Time:e.time||'',Repeat:e.repeat||'none',Amount:e.amount||0,Person:nm(e.who)})),['ID','Title','Category','Date','Time','Repeat','Amount','Person']);
+  add('Chores',S.chores.map(c=>({ID:c.id,Chore:c.title,'Assigned to':nm(c.who),Points:c.points||1,Done:c.done?'yes':'no','Done by':nm(c.doneBy)})),['ID','Chore','Assigned to','Points','Done','Done by']);
+  add('Shopping',S.shop.map(x=>({ID:x.id,Item:x.text,Bought:x.done?'yes':'no','Added by':nm(x.by)})),['ID','Item','Bought','Added by']);
+  add('Board',[...S.posts].sort((a,b)=>a.ts-b.ts).map(p=>({ID:p.id,Message:p.text,By:nm(p.who),Time:new Date(p.ts).toISOString(),TS:p.ts})),['ID','Message','By','Time','TS']);
+  X.writeFile(wb,'family-hub-backup-'+today()+'.xlsx');
+}
+async function importExcel(file){
+  const X=await loadXlsx();const wb=X.read(await file.arrayBuffer(),{type:'array'});
+  const rows=n=>wb.Sheets[n]?X.utils.sheet_to_json(wb.Sheets[n],{defval:''}):[];
+  const dstr=v=>{if(typeof v==='number'){const p=X.SSF.parse_date_code(v);return p?p.y+'-'+pad(p.m)+'-'+pad(p.d):''}if(v instanceof Date)return ds(v);return String(v).slice(0,10)};
+  const tstr=v=>{if(typeof v==='number'){const m=Math.round(v*1440);return pad(Math.floor(m/60)%24)+':'+pad(m%60)}return String(v||'').slice(0,5)};
+  const members=rows('Members').filter(r=>r.Name).map((r,i)=>({id:String(r.ID||uid()),name:String(r.Name),color:r.Color||COLORS[i%COLORS.length]}));
+  const byName=n=>{const m=members.find(x=>x.name.toLowerCase()===String(n||'').trim().toLowerCase());return m?m.id:''};
+  const catKey=l=>Object.keys(CATS).find(k=>CATS[k][1].toLowerCase()===String(l).toLowerCase())||'event';
+  const next={members,
+    events:rows('Calendar').filter(r=>r.Title&&r.Date).map(r=>({id:String(r.ID||uid()),title:String(r.Title),cat:catKey(r.Category),date:dstr(r.Date),time:tstr(r.Time),repeat:['monthly','yearly'].includes(String(r.Repeat).toLowerCase())?String(r.Repeat).toLowerCase():'none',amount:+r.Amount||0,who:byName(r.Person)})),
+    chores:rows('Chores').filter(r=>r.Chore).map(r=>({id:String(r.ID||uid()),title:String(r.Chore),who:byName(r['Assigned to']),points:+r.Points||1,done:String(r.Done).toLowerCase()==='yes',doneBy:byName(r['Done by'])||null})),
+    shop:rows('Shopping').filter(r=>r.Item).map(r=>({id:String(r.ID||uid()),text:String(r.Item),done:String(r.Bought).toLowerCase()==='yes',by:byName(r['Added by'])})),
+    posts:rows('Board').filter(r=>r.Message).map(r=>({id:String(r.ID||uid()),text:String(r.Message),who:byName(r.By),ts:+r.TS||Date.parse(r.Time)||Date.now()}))};
+  COLS.forEach(c=>{S[c]=next[c]});persist();render();
+  if(sync.pushAll)sync.pushAll().catch(e=>banner('Sync problem: '+(e.message||e)));
+  return COLS.map(c=>next[c].length+' '+c).join(', ');
+}
+const VIEWS={home:vHome,cal:vCal,chores:vChores,shop:vShop,board:vBoard,fam:vFam};
+function render(){
+  const a=document.activeElement;
+  if(a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA')&&a.value&&$('#view').contains(a))return; // don't wipe typing
+  renderNav();renderMe();
+  const m=$('#view');m.innerHTML='';m.append(VIEWS[tab]());
+  window.scrollTo(0,0);
+}
+window.addEventListener('hashchange',()=>{const h=location.hash.slice(1);if(VIEWS[h]&&h!==tab){tab=h;render()}});
+render();
+startSync();
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+})();
+</script>
+</body>
+</html>
